@@ -661,13 +661,8 @@ int InitMode(int tag, int p2p, int hce)
     {
         printf("Step 7: Enabling discovery...\n");
         printf("Parameters: DEFAULT_NFA_TECH_MASK, 0x00, hce=%d, 0\n", hce);
-        int discovery_result = doEnableDiscovery(DEFAULT_NFA_TECH_MASK, 0x00, hce, 0);
-        printf("Step 7: doEnableDiscovery() returned: %d\n", discovery_result);
-        
-        if(discovery_result != 0) {
-            printf("WARNING: Discovery enable returned non-zero: %d\n", discovery_result);
-            // Note: Some implementations return non-zero but still work
-        }
+        doEnableDiscovery(DEFAULT_NFA_TECH_MASK, 0x00, hce, 0);
+        printf("Step 7: doEnableDiscovery() called (void return)\n");
         
         if(0x01 == p2p)
         {
@@ -684,6 +679,10 @@ int InitMode(int tag, int p2p, int hce)
 #else
             printf("Step 8: SNEP not enabled (compiled out)\n");
 #endif
+        }
+        else
+        {
+            printf("Step 8: P2P not requested, skipping SNEP server\n");
         }
     }
     
