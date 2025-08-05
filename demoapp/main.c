@@ -1862,35 +1862,35 @@ int LookForTag(char** args, int args_len, char* tag, char** data, int format)
     return res;
 }
  
-void cmd_poll(int arg_len, char** arg)
-{
-    int res = 0x00;
+// void cmd_poll(int arg_len, char** arg)
+// {
+//     int res = 0x00;
     
-    printf("#########################################################################################\n");
-    printf("##                                       NFC demo                                      ##\n");
-    printf("#########################################################################################\n");
-    printf("##                                 Poll mode activated                                 ##\n");
-    printf("#########################################################################################\n");
+//     printf("#########################################################################################\n");
+//     printf("##                                       NFC demo                                      ##\n");
+//     printf("#########################################################################################\n");
+//     printf("##                                 Poll mode activated                                 ##\n");
+//     printf("#########################################################################################\n");
     
-    InitEnv();
-    if(0x00 == LookForTag(arg, arg_len, "-h", NULL, 0x00) || 0x00 == LookForTag(arg, arg_len, "--help", NULL, 0x01))
-    {
-        help(0x01);
-    }
-    else
-    {
-        res = InitMode(0x01, 0x01, 0x00);
+//     InitEnv();
+//     if(0x00 == LookForTag(arg, arg_len, "-h", NULL, 0x00) || 0x00 == LookForTag(arg, arg_len, "--help", NULL, 0x01))
+//     {
+//         help(0x01);
+//     }
+//     else
+//     {
+//         res = InitMode(0x01, 0x01, 0x00);
         
-        if(0x00 == res)
-        {
-            WaitDeviceArrival(0x01, NULL , 0x00);
-        }
+//         if(0x00 == res)
+//         {
+//             WaitDeviceArrival(0x01, NULL , 0x00);
+//         }
     
-        DeinitPollMode();
-    }
+//         DeinitPollMode();
+//     }
     
-    printf("Leaving ...\n");
-}
+//     printf("Leaving ...\n");
+// }
  
 void cmd_push(int arg_len, char** arg)
 {
@@ -2071,9 +2071,13 @@ int InitEnv()
     eResult tool_res = FRAMEWORK_SUCCESS;
     int res = 0x00;
     
+    // Initialize thread handle to NULL
+    g_ThreadHandle = NULL;
+    
     tool_res = framework_CreateMutex(&g_devLock);
     if(FRAMEWORK_SUCCESS != tool_res)
     {
+        printf("Failed to create device mutex\n");
         res = 0xFF;
     }
     
@@ -2082,6 +2086,7 @@ int InitEnv()
         tool_res = framework_CreateMutex(&g_SnepClientLock);
         if(FRAMEWORK_SUCCESS != tool_res)
         {
+            printf("Failed to create SNEP client mutex\n");
             res = 0xFF;
         }
      }
@@ -2091,22 +2096,31 @@ int InitEnv()
         tool_res = framework_CreateMutex(&g_HCELock);
         if(FRAMEWORK_SUCCESS != tool_res)
         {
+            printf("Failed to create HCE mutex\n");
             res = 0xFF;
         }
      }
+     
+     // Optional: Create exit thread only if needed
+     // Comment out this section if you don't want the exit thread
+     /*
      if(0x00 == res)
-    {
-        tool_res = framework_CreateThread(&g_ThreadHandle, ExitThread, NULL);
-        if(FRAMEWORK_SUCCESS != tool_res)
-        {
-            res = 0xFF;
-        }
-    }
+     {
+         tool_res = framework_CreateThread(&g_ThreadHandle, ExitThread, NULL);
+         if(FRAMEWORK_SUCCESS != tool_res)
+         {
+             printf("Failed to create exit thread\n");
+             res = 0xFF;
+         }
+     }
+     */
+     
     return res;
 }
 
 int CleanEnv()
 {
+    // Only clean up thread if it was created
     if(NULL != g_ThreadHandle)
     {
         framework_JoinThread(g_ThreadHandle);
@@ -2125,12 +2139,56 @@ int CleanEnv()
         framework_DeleteMutex(g_SnepClientLock);
         g_SnepClientLock = NULL;
     }
+    
     if(NULL != g_HCELock)
     {
         framework_DeleteMutex(g_HCELock);
         g_HCELock = NULL;
     }
+    
     return 0x00;
+}
+
+// Modified command functions to check InitEnv return value
+void cmd_poll(int arg_len, char** arg)
+{
+    int res = 0x00;
+    
+    printf("#########################################################################################\n");
+    printf("##                                       NFC demo                                      ##\n");
+    printf("#########################################################################################\n");
+    printf("##                                 Poll mode activated                                 ##\n");
+    printf("#########################################################################################\n");
+    
+    res = InitEnv();
+    if(0x00 != res)
+    {
+        printf("Failed to initialize environment\n");
+        return;
+    }
+    
+    if(0x00 == LookForTag(arg, arg_len, "-h", NULL, 0x00) || 0x00 == LookForTag(arg, arg_len, "--help", NULL, 0x01))
+    {
+        help(0x01);
+    }
+    else
+    {
+        res = InitMode(0x01, 0x01, 0x00);
+        
+        if(0x00 == res)
+        {
+            WaitDeviceArrival(0x01, NULL , 0x00);
+        }
+        else
+        {
+            printf("Failed to initialize NFC mode\n");
+        }
+    
+        DeinitPollMode();
+    }
+    
+    CleanEnv();
+    printf("Leaving ...\n");
 }
  
 int main(int argc, char ** argv)
