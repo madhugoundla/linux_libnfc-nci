@@ -2103,17 +2103,23 @@ int InitEnv()
      
      // Optional: Create exit thread only if needed
      // Comment out this section if you don't want the exit thread
-     /*
-     if(0x00 == res)
-     {
-         tool_res = framework_CreateThread(&g_ThreadHandle, ExitThread, NULL);
-         if(FRAMEWORK_SUCCESS != tool_res)
-         {
-             printf("Failed to create exit thread\n");
-             res = 0xFF;
-         }
-     }
-     */
+
+    if(0x00 == res)
+    {
+        printf("Creating exit thread...\n");
+        tool_res = framework_CreateThread(&g_ThreadHandle, ExitThread, NULL);
+        if(FRAMEWORK_SUCCESS != tool_res)
+        {
+            printf("Failed to create exit thread - continuing without it\n");
+            g_ThreadHandle = NULL;  // Set to NULL so cleanup knows it wasn't created
+            // Don't set res = 0xFF here - continue anyway
+        }
+        else
+        {
+            printf("Exit thread created successfully\n");
+        }
+    }
+
      
     return res;
 }
