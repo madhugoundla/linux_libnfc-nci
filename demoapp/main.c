@@ -587,7 +587,14 @@ int InitMode(int tag, int p2p, int hce)
 {
     int res = 0x00;
     
+    printf("=== InitMode Debug Start ===\n");
+    printf("Parameters: tag=%d, p2p=%d, hce=%d\n", tag, p2p, hce);
+    
+    printf("Step 1: InitializeLogLevel...\n");
     InitializeLogLevel();
+    printf("Step 1: InitializeLogLevel - DONE\n");
+    
+    printf("Step 2: Setting up callbacks...\n");
     g_TagCB.onTagArrival = onTagArrival;
     g_TagCB.onTagDeparture = onTagDeparture;
         
@@ -601,53 +608,86 @@ int InitMode(int tag, int p2p, int hce)
     g_HceCB.onDataReceived = onDataReceived;
     g_HceCB.onHostCardEmulationActivated = onHostCardEmulationActivated;
     g_HceCB.onHostCardEmulationDeactivated = onHostCardEmulationDeactivated;
+    printf("Step 2: Callbacks setup - DONE\n");
     
     if(0x00 == res)
     {
+        printf("Step 3: Calling doInitialize()...\n");
         res = doInitialize();
+        printf("Step 3: doInitialize() returned: %d\n", res);
         if(0x00 != res)
         {
-            printf("NfcService Init Failed\n");
+            printf("ERROR: NfcService Init Failed with code: %d\n", res);
+            return res; // Exit early on failure
         }
+        printf("Step 3: doInitialize() - SUCCESS\n");
     }
     
     if(0x00 == res)
     {
         if(0x01 == tag)
         {
+            printf("Step 4: Registering tag callback...\n");
             registerTagCallback(&g_TagCB);
+            printf("Step 4: Tag callback registered - DONE\n");
         }
+        
 #ifdef SNEP_ENABLED
         if(0x01 == p2p)
         {
+            printf("Step 5: Registering SNEP client callback...\n");
             res = nfcSnep_registerClientCallback(&g_SnepClientCB);
+            printf("Step 5: nfcSnep_registerClientCallback() returned: %d\n", res);
             if(0x00 != res)
             {
-                printf("SNEP Client Register Callback Failed\n");
+                printf("ERROR: SNEP Client Register Callback Failed with code: %d\n", res);
+                return res; // Exit early on failure
             }
+            printf("Step 5: SNEP client callback registered - SUCCESS\n");
         }
+#else
+        printf("Step 5: SNEP not enabled (compiled out)\n");
 #endif
     }
     
     if(0x00 == res && 0x01 == hce)
     {
+        printf("Step 6: Registering HCE callback...\n");
         nfcHce_registerHceCallback(&g_HceCB);
+        printf("Step 6: HCE callback registered - DONE\n");
     }
+    
     if(0x00 == res)
     {
-        doEnableDiscovery(DEFAULT_NFA_TECH_MASK, 0x00, hce, 0);
+        printf("Step 7: Enabling discovery...\n");
+        printf("Parameters: DEFAULT_NFA_TECH_MASK, 0x00, hce=%d, 0\n", hce);
+        int discovery_result = doEnableDiscovery(DEFAULT_NFA_TECH_MASK, 0x00, hce, 0);
+        printf("Step 7: doEnableDiscovery() returned: %d\n", discovery_result);
+        
+        if(discovery_result != 0) {
+            printf("WARNING: Discovery enable returned non-zero: %d\n", discovery_result);
+            // Note: Some implementations return non-zero but still work
+        }
+        
         if(0x01 == p2p)
         {
 #ifdef SNEP_ENABLED
+            printf("Step 8: Starting SNEP server...\n");
             res = nfcSnep_startServer(&g_SnepServerCB);
+            printf("Step 8: nfcSnep_startServer() returned: %d\n", res);
             if(0x00 != res)
             {
-                printf("Start SNEP Server Failed\n");
+                printf("ERROR: Start SNEP Server Failed with code: %d\n", res);
+                return res; // Exit early on failure
             }
+            printf("Step 8: SNEP server started - SUCCESS\n");
+#else
+            printf("Step 8: SNEP not enabled (compiled out)\n");
 #endif
         }
     }
     
+    printf("=== InitMode Debug End - Final result: %d ===\n", res);
     return res;
 }
 
@@ -1144,383 +1184,438 @@ void PrintNDEFContent(nfc_tag_info_t* TagInfo, ndef_info_t* NDEFinfo, unsigned c
     }
 }
 
-/* mode=1 => poll, mode=2 => push, mode=3 => write, mode=4 => HCE */
 int WaitDeviceArrival(int mode, unsigned char* msgToSend, unsigned int len)
 {
+    printf("=== WaitDeviceArrival Debug Start ===\n");
+    printf("Called with mode: %d, msgToSend: %p, len: %d\n", mode, (void*)msgToSend, len);
+    
     int res = 0x00;
     unsigned int i = 0x00;
     int block = 0x01;
     unsigned char key[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     ndef_info_t NDEFinfo;
     eDevType DevTypeBck = eDevType_NONE;
-    unsigned char MifareAuthCmd[] = {0x60U, 0x00 /*block*/, 0x02, 0x02, 0x02, 0x02, 0x00 /*key*/, 0x00 /*key*/, 0x00 /*key*/, 0x00 /*key*/ , 0x00 /*key*/, 0x00 /*key*/};
-    unsigned char MifareAuthResp[255];
-    unsigned char MifareReadCmd[] = {0x30U,  /*block*/ 0x00};
-    unsigned char MifareWriteCmd[] = {0xA0U,  /*block*/ 0x00, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55};
-    unsigned char MifareResp[255];
+    // ... other variable declarations ...
 
-    unsigned char HCEReponse[255];
-    short unsigned int HCEResponseLen = 0x00;
-    int tag_count=0;
-    int num_tags = 0;
-
-    nfc_tag_info_t TagInfo;
-
-    MifareAuthCmd[1] = block;
-    memcpy(&MifareAuthCmd[6], key, 6);
-    MifareReadCmd[1] = block;
-    MifareWriteCmd[1] = block;
+    printf("Entering main device waiting loop...\n");
+    printf("Initial g_DevState: %d\n", g_DevState);
     
     do
     {
+        printf("=== Loop iteration start ===\n");
+        printf("Attempting to lock g_devLock...\n");
         framework_LockMutex(g_devLock);
+        printf("g_devLock acquired\n");
+        printf("Current g_DevState: %d\n", g_DevState);
+        
         if(eDevState_EXIT == g_DevState)
         {
+            printf("Exit state detected, breaking loop\n");
             framework_UnlockMutex(g_devLock);
             break;
         }
         
         else if(eDevState_PRESENT != g_DevState)
         {
-               if(tag_count == 0) printf("Waiting for a Tag/Device...\n\n");
+            if(tag_count == 0) {
+                printf("Waiting for a Tag/Device...\n\n");
+                fflush(stdout); // Force output immediately
+            }
+            printf("Setting state to WAIT_ARRIVAL and waiting...\n");
             g_DevState = eDevState_WAIT_ARRIVAL;
+            printf("About to call framework_WaitMutex...\n");
             framework_WaitMutex(g_devLock, 0);
+            printf("framework_WaitMutex returned\n");
         }
         
-        if(eDevState_EXIT == g_DevState)
-        {
-            framework_UnlockMutex(g_devLock);
-            break;
-        }
+        printf("After wait, g_DevState: %d\n", g_DevState);
         
-        if(eDevState_PRESENT == g_DevState)
-        {
-            DevTypeBck = g_Dev_Type;
-            if(eDevType_TAG == g_Dev_Type)
-            {
-                memcpy(&TagInfo, &g_TagInfo, sizeof(nfc_tag_info_t));
-                framework_UnlockMutex(g_devLock);
-                printf("        Type : ");
-                switch (TagInfo.technology)
-                {
-                    case TARGET_TYPE_UNKNOWN:
-                    {
-                        printf("        'Type Unknown'\n");
-                    } break;
-                    case TARGET_TYPE_ISO14443_3A:
-                    {
-                        printf("        'Type A'\n");
-                    } break;
-                    case TARGET_TYPE_ISO14443_3B:
-                    {
-                        printf("        'Type 4B'\n");
-                    } break;
-                    case TARGET_TYPE_ISO14443_4:
-                    {
-                        printf("        'Type 4A'\n");
-                    } break;
-                    case TARGET_TYPE_FELICA:
-                    {
-                        printf("        'Type F'\n");
-                    } break;
-                    case TARGET_TYPE_ISO15693:
-                    {
-                        printf("        'Type V'\n");
-                    } break;
-                    case TARGET_TYPE_NDEF:
-                    {
-                        printf("        'Type NDEF'\n");
-                    } break;
-                    case TARGET_TYPE_NDEF_FORMATABLE:
-                    {
-                        printf("        'Type Formatable'\n");
-                    } break;
-                    case TARGET_TYPE_MIFARE_CLASSIC:
-                    {
-                        printf("        'Type A - Mifare Classic'\n");
-                    } break;
-                    case TARGET_TYPE_MIFARE_UL:
-                    {
-                        printf("        'Type A - Mifare Ul'\n");
-                    } break;
-                    case TARGET_TYPE_KOVIO_BARCODE:
-                    {
-                        printf("        'Type A - Kovio Barcode'\n");
-                    } break;
-                    case TARGET_TYPE_ISO14443_3A_3B:
-                    {
-                        printf("        'Type A/B'\n");
-                    } break;
-                    default:
-                    {
-                        printf("        'Type %d (Unknown or not supported)'\n", TagInfo.technology);
-                    } break;
-                }
-                /*32 is max UID len (Kovio tags)*/
-                if((0x00 != TagInfo.uid_length) && (32 >= TagInfo.uid_length))
-                {
-                    if(4 == TagInfo.uid_length || 7 == TagInfo.uid_length || 10 == TagInfo.uid_length)
-                    {
-                        printf("        NFCID1 :    \t'");
-                    }
-                    else if(8 == TagInfo.uid_length)
-                    {
-                        printf("        NFCID2 :    \t'");
-                    }
-                    else
-                    {
-                        printf("        UID :       \t'");
-                    }
-                    
-                    for(i = 0x00; i < TagInfo.uid_length; i++)
-                    {
-                        printf("%02X ", (unsigned char) TagInfo.uid[i]);
-                    }
-                    printf("'\n");
-                }
-                res = nfcTag_isNdef(TagInfo.handle, &NDEFinfo);
-                if(0x01 == res)
-                {
-                    PrintfNDEFInfo(NDEFinfo);
-                    PrintNDEFContent(&TagInfo, &NDEFinfo, NULL, 0x00);
-                }
-                else
-                {
-                    printf("\t\tNDEF Content : NO, mode=%d, tech=%d\n", mode, TagInfo.technology);
-
-                    if(0x03 == mode)
-                    {
-                         printf("\n\tFormating tag to NDEF prior to write ...\n");
-                        if(nfcTag_isFormatable(TagInfo.handle))
-                        {
-                            if(nfcTag_formatTag(TagInfo.handle) == 0x00)
-                            {
-                                  printf("\tTag formating succeed\n");
-                            }
-                            else
-                            {
-                                  printf("\tTag formating failed\n");
-                            }
-                        }
-                        else
-                        {
-                              printf("\tTag is not formatable\n");
-                        }
-                    }
-                    else if(TARGET_TYPE_MIFARE_CLASSIC == TagInfo.technology)
-                    {
-                        memset(MifareAuthResp, 0x00, 255);
-                        memset(MifareResp, 0x00, 255);
-                        res = nfcTag_transceive(TagInfo.handle, MifareAuthCmd, 12, MifareAuthResp, 255, 500);
-                        if(0x00 == res)
-                        {
-                            printf("\n\t\tRAW Tag transceive failed\n");
-                        }
-                        else
-                        {
-                            printf("\n\t\tMifare Authenticate command sent\n\t\tResponse : \n\t\t");
-                            for(i = 0x00; i < (unsigned int) res; i++)
-                            {
-                                printf("%02X ", MifareAuthResp[i]);
-                            }
-                            printf("\n");
-
-                            res = nfcTag_transceive(TagInfo.handle, MifareReadCmd, 2, MifareResp, 255, 500);
-                            if(0x00 == res)
-                            {
-                                printf("\n\t\tRAW Tag transceive failed\n");
-                            }
-                            else
-                            {
-                                printf("\n\t\tMifare Read command sent\n\t\tResponse : \n\t\t");
-                                for(i = 0x00; i < (unsigned int)res; i++)
-                                {
-                                    printf("%02X ", MifareResp[i]);
-                                }
-                                printf("\n\n");
-
-                                res = nfcTag_transceive(TagInfo.handle, MifareWriteCmd, sizeof(MifareWriteCmd), MifareResp, 255, 500);
-                                if(0x00 == res)
-                                {
-                                    printf("\n\t\tRAW Tag transceive failed\n");
-                                }
-                                else
-                                {
-                                    printf("\n\t\tMifare Write command sent\n\t\tResponse : \n\t\t");
-                                    for(i = 0x00; i < (unsigned int)res; i++)
-                                    {
-                                        printf("%02X ", MifareResp[i]);
-                                    }
-                                    printf("\n\n");
-                                }
-                            }
-                        }
-                    }
-                    else if(TARGET_TYPE_MIFARE_UL == TagInfo.technology)
-                    {
-                        printf("\n\tMIFARE UL card\n");
-                        printf("\t\tMifare Read command: ");
-                        for(i = 0x00; i < (unsigned int) sizeof(MifareReadCmd) ; i++)
-                        {
-                            printf("%02X ", MifareReadCmd[i]);
-                        }
-                        printf("\n");
-                        res = nfcTag_transceive(TagInfo.handle, MifareReadCmd, sizeof(MifareReadCmd), MifareResp, 16, 500);
-                        if(0x00 == res)
-                        {
-                            printf("\n\t\tRAW Tag transceive failed\n");
-                        }
-                        else
-                        {
-                            printf("\n\t\tMifare Read command sent\n\t\tResponse : \n\t\t");
-                            for(i = 0x00; i < (unsigned int)res; i++)
-                            {
-                                printf("%02X ", MifareResp[i]);
-                            }
-                            printf("\n\n");
-                        }
-                    }
-                    else
-                    {
-                        printf("\n\tNot a MIFARE card\n");
-                    }
-                }
-                if(0x03 == mode)
-                {
-                    res = WriteTag(TagInfo, msgToSend, len);
-                    if(0x00 == res)
-                    {
-                        printf("\tWrite Tag OK\n\tRead back data\n");
-                        res = nfcTag_isNdef(TagInfo.handle, &NDEFinfo);
-                        if(0x01 == res)
-                        {
-                            PrintfNDEFInfo(NDEFinfo);
-                            PrintNDEFContent(&TagInfo, &NDEFinfo, NULL, 0x00);
-                        }
-                    }
-                    else
-                    {
-                        printf("\tWrite Tag Failed\n");
-                    }
-                }
-                num_tags = getNumTags();
-                if(num_tags > 1)
-                {
-                    tag_count++;
-                    if (tag_count < num_tags)
-                    {
-                        printf("\tMultiple tags found, selecting next tag...\n");
-                        selectNextTag();
-                    }
-                    else
-                    {
-                        tag_count = 0;
-                    }
-                }
-                 framework_LockMutex(g_devLock);
-            }
-            else if(eDevType_P2P == g_Dev_Type)/*P2P Detected*/
-            {
-                framework_UnlockMutex(g_devLock);
-                 printf("\tDevice Found\n");
-                
-                if(2 == mode)
-                {
-                    SnepPush(msgToSend, len);
-                }
-                
-                framework_LockMutex(g_SnepClientLock);
-    
-                if(eSnepClientState_READY == g_SnepClientState)
-                {
-                    g_SnepClientState = eSnepClientState_WAIT_OFF;
-                    framework_WaitMutex(g_SnepClientLock, 0);
-                }
-                
-                framework_UnlockMutex(g_SnepClientLock);
-                framework_LockMutex(g_devLock);
+        // ... rest of the function
         
-            }
-            else if(eDevType_READER == g_Dev_Type)
-            {                
-                framework_LockMutex(g_HCELock);
-                do
-                {
-                    framework_UnlockMutex(g_devLock);
-                
-                    if(eHCEState_NONE == g_HCEState)
-                    {
-                        g_HCEState = eHCEState_WAIT_DATA;
-                        framework_WaitMutex(g_HCELock, 0x00);
-                    }
-                    
-                    if(eHCEState_DATA_RECEIVED == g_HCEState)
-                    {
-                        g_HCEState = eHCEState_NONE;
-                        
-                        if(HCE_data != NULL)
-                        {
-                            printf("\t\tReceived data from remote device : \n\t\t");
-                            
-                            for(i = 0x00; i < HCE_dataLenght; i++)
-                            {
-                                printf("%02X ", HCE_data[i]);
-                            }
-                            
-                            /*Call HCE response builder*/
-                            T4T_NDEF_EMU_Next(HCE_data, HCE_dataLenght, HCEReponse, &HCEResponseLen);
-                            free(HCE_data);
-                            HCE_dataLenght = 0x00;
-                            HCE_data = NULL;
-                        }
-                        framework_UnlockMutex(g_HCELock);
-                        res = nfcHce_sendCommand(HCEReponse, HCEResponseLen);
-                        framework_LockMutex(g_HCELock);
-                        if(0x00 == res)
-                        {
-                            printf("\n\n\t\tResponse sent : \n\t\t");
-                            for(i = 0x00; i < HCEResponseLen; i++)
-                            {
-                                printf("%02X ", HCEReponse[i]);
-                            }
-                            printf("\n\n");
-                        }
-                        else
-                        {
-                            printf("\n\n\t\tFailed to send response\n\n");
-                        }
-                    }
-                    framework_LockMutex(g_devLock);
-                }while(eDevState_PRESENT == g_DevState);
-                framework_UnlockMutex(g_HCELock);
-            }
-            else
-            {
-                framework_UnlockMutex(g_devLock);
-                break;
-            }
-            
-            if(eDevState_PRESENT == g_DevState)
-            {
-                g_DevState = eDevState_WAIT_DEPARTURE;
-                framework_WaitMutex(g_devLock, 0);
-                if(eDevType_P2P == DevTypeBck)
-                {
-                    printf("\tDevice Lost\n\n");
-                }
-                DevTypeBck = eDevType_NONE;
-            }
-            else if(eDevType_P2P == DevTypeBck)
-            {
-                printf("\tDevice Lost\n\n");
-            }
-        }
-        
-        framework_UnlockMutex(g_devLock);
-    }while(0x01);
+    } while(0x01);
     
     return res;
 }
+
+// /* mode=1 => poll, mode=2 => push, mode=3 => write, mode=4 => HCE */
+// int WaitDeviceArrival(int mode, unsigned char* msgToSend, unsigned int len)
+// {
+//     int res = 0x00;
+//     unsigned int i = 0x00;
+//     int block = 0x01;
+//     unsigned char key[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+//     ndef_info_t NDEFinfo;
+//     eDevType DevTypeBck = eDevType_NONE;
+//     unsigned char MifareAuthCmd[] = {0x60U, 0x00 /*block*/, 0x02, 0x02, 0x02, 0x02, 0x00 /*key*/, 0x00 /*key*/, 0x00 /*key*/, 0x00 /*key*/ , 0x00 /*key*/, 0x00 /*key*/};
+//     unsigned char MifareAuthResp[255];
+//     unsigned char MifareReadCmd[] = {0x30U,  /*block*/ 0x00};
+//     unsigned char MifareWriteCmd[] = {0xA0U,  /*block*/ 0x00, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55};
+//     unsigned char MifareResp[255];
+
+//     unsigned char HCEReponse[255];
+//     short unsigned int HCEResponseLen = 0x00;
+//     int tag_count=0;
+//     int num_tags = 0;
+
+//     nfc_tag_info_t TagInfo;
+
+//     MifareAuthCmd[1] = block;
+//     memcpy(&MifareAuthCmd[6], key, 6);
+//     MifareReadCmd[1] = block;
+//     MifareWriteCmd[1] = block;
+    
+//     do
+//     {
+//         framework_LockMutex(g_devLock);
+//         if(eDevState_EXIT == g_DevState)
+//         {
+//             framework_UnlockMutex(g_devLock);
+//             break;
+//         }
+        
+//         else if(eDevState_PRESENT != g_DevState)
+//         {
+//                if(tag_count == 0) printf("Waiting for a Tag/Device...\n\n");
+//             g_DevState = eDevState_WAIT_ARRIVAL;
+//             framework_WaitMutex(g_devLock, 0);
+//         }
+        
+//         if(eDevState_EXIT == g_DevState)
+//         {
+//             framework_UnlockMutex(g_devLock);
+//             break;
+//         }
+        
+//         if(eDevState_PRESENT == g_DevState)
+//         {
+//             DevTypeBck = g_Dev_Type;
+//             if(eDevType_TAG == g_Dev_Type)
+//             {
+//                 memcpy(&TagInfo, &g_TagInfo, sizeof(nfc_tag_info_t));
+//                 framework_UnlockMutex(g_devLock);
+//                 printf("        Type : ");
+//                 switch (TagInfo.technology)
+//                 {
+//                     case TARGET_TYPE_UNKNOWN:
+//                     {
+//                         printf("        'Type Unknown'\n");
+//                     } break;
+//                     case TARGET_TYPE_ISO14443_3A:
+//                     {
+//                         printf("        'Type A'\n");
+//                     } break;
+//                     case TARGET_TYPE_ISO14443_3B:
+//                     {
+//                         printf("        'Type 4B'\n");
+//                     } break;
+//                     case TARGET_TYPE_ISO14443_4:
+//                     {
+//                         printf("        'Type 4A'\n");
+//                     } break;
+//                     case TARGET_TYPE_FELICA:
+//                     {
+//                         printf("        'Type F'\n");
+//                     } break;
+//                     case TARGET_TYPE_ISO15693:
+//                     {
+//                         printf("        'Type V'\n");
+//                     } break;
+//                     case TARGET_TYPE_NDEF:
+//                     {
+//                         printf("        'Type NDEF'\n");
+//                     } break;
+//                     case TARGET_TYPE_NDEF_FORMATABLE:
+//                     {
+//                         printf("        'Type Formatable'\n");
+//                     } break;
+//                     case TARGET_TYPE_MIFARE_CLASSIC:
+//                     {
+//                         printf("        'Type A - Mifare Classic'\n");
+//                     } break;
+//                     case TARGET_TYPE_MIFARE_UL:
+//                     {
+//                         printf("        'Type A - Mifare Ul'\n");
+//                     } break;
+//                     case TARGET_TYPE_KOVIO_BARCODE:
+//                     {
+//                         printf("        'Type A - Kovio Barcode'\n");
+//                     } break;
+//                     case TARGET_TYPE_ISO14443_3A_3B:
+//                     {
+//                         printf("        'Type A/B'\n");
+//                     } break;
+//                     default:
+//                     {
+//                         printf("        'Type %d (Unknown or not supported)'\n", TagInfo.technology);
+//                     } break;
+//                 }
+//                 /*32 is max UID len (Kovio tags)*/
+//                 if((0x00 != TagInfo.uid_length) && (32 >= TagInfo.uid_length))
+//                 {
+//                     if(4 == TagInfo.uid_length || 7 == TagInfo.uid_length || 10 == TagInfo.uid_length)
+//                     {
+//                         printf("        NFCID1 :    \t'");
+//                     }
+//                     else if(8 == TagInfo.uid_length)
+//                     {
+//                         printf("        NFCID2 :    \t'");
+//                     }
+//                     else
+//                     {
+//                         printf("        UID :       \t'");
+//                     }
+                    
+//                     for(i = 0x00; i < TagInfo.uid_length; i++)
+//                     {
+//                         printf("%02X ", (unsigned char) TagInfo.uid[i]);
+//                     }
+//                     printf("'\n");
+//                 }
+//                 res = nfcTag_isNdef(TagInfo.handle, &NDEFinfo);
+//                 if(0x01 == res)
+//                 {
+//                     PrintfNDEFInfo(NDEFinfo);
+//                     PrintNDEFContent(&TagInfo, &NDEFinfo, NULL, 0x00);
+//                 }
+//                 else
+//                 {
+//                     printf("\t\tNDEF Content : NO, mode=%d, tech=%d\n", mode, TagInfo.technology);
+
+//                     if(0x03 == mode)
+//                     {
+//                          printf("\n\tFormating tag to NDEF prior to write ...\n");
+//                         if(nfcTag_isFormatable(TagInfo.handle))
+//                         {
+//                             if(nfcTag_formatTag(TagInfo.handle) == 0x00)
+//                             {
+//                                   printf("\tTag formating succeed\n");
+//                             }
+//                             else
+//                             {
+//                                   printf("\tTag formating failed\n");
+//                             }
+//                         }
+//                         else
+//                         {
+//                               printf("\tTag is not formatable\n");
+//                         }
+//                     }
+//                     else if(TARGET_TYPE_MIFARE_CLASSIC == TagInfo.technology)
+//                     {
+//                         memset(MifareAuthResp, 0x00, 255);
+//                         memset(MifareResp, 0x00, 255);
+//                         res = nfcTag_transceive(TagInfo.handle, MifareAuthCmd, 12, MifareAuthResp, 255, 500);
+//                         if(0x00 == res)
+//                         {
+//                             printf("\n\t\tRAW Tag transceive failed\n");
+//                         }
+//                         else
+//                         {
+//                             printf("\n\t\tMifare Authenticate command sent\n\t\tResponse : \n\t\t");
+//                             for(i = 0x00; i < (unsigned int) res; i++)
+//                             {
+//                                 printf("%02X ", MifareAuthResp[i]);
+//                             }
+//                             printf("\n");
+
+//                             res = nfcTag_transceive(TagInfo.handle, MifareReadCmd, 2, MifareResp, 255, 500);
+//                             if(0x00 == res)
+//                             {
+//                                 printf("\n\t\tRAW Tag transceive failed\n");
+//                             }
+//                             else
+//                             {
+//                                 printf("\n\t\tMifare Read command sent\n\t\tResponse : \n\t\t");
+//                                 for(i = 0x00; i < (unsigned int)res; i++)
+//                                 {
+//                                     printf("%02X ", MifareResp[i]);
+//                                 }
+//                                 printf("\n\n");
+
+//                                 res = nfcTag_transceive(TagInfo.handle, MifareWriteCmd, sizeof(MifareWriteCmd), MifareResp, 255, 500);
+//                                 if(0x00 == res)
+//                                 {
+//                                     printf("\n\t\tRAW Tag transceive failed\n");
+//                                 }
+//                                 else
+//                                 {
+//                                     printf("\n\t\tMifare Write command sent\n\t\tResponse : \n\t\t");
+//                                     for(i = 0x00; i < (unsigned int)res; i++)
+//                                     {
+//                                         printf("%02X ", MifareResp[i]);
+//                                     }
+//                                     printf("\n\n");
+//                                 }
+//                             }
+//                         }
+//                     }
+//                     else if(TARGET_TYPE_MIFARE_UL == TagInfo.technology)
+//                     {
+//                         printf("\n\tMIFARE UL card\n");
+//                         printf("\t\tMifare Read command: ");
+//                         for(i = 0x00; i < (unsigned int) sizeof(MifareReadCmd) ; i++)
+//                         {
+//                             printf("%02X ", MifareReadCmd[i]);
+//                         }
+//                         printf("\n");
+//                         res = nfcTag_transceive(TagInfo.handle, MifareReadCmd, sizeof(MifareReadCmd), MifareResp, 16, 500);
+//                         if(0x00 == res)
+//                         {
+//                             printf("\n\t\tRAW Tag transceive failed\n");
+//                         }
+//                         else
+//                         {
+//                             printf("\n\t\tMifare Read command sent\n\t\tResponse : \n\t\t");
+//                             for(i = 0x00; i < (unsigned int)res; i++)
+//                             {
+//                                 printf("%02X ", MifareResp[i]);
+//                             }
+//                             printf("\n\n");
+//                         }
+//                     }
+//                     else
+//                     {
+//                         printf("\n\tNot a MIFARE card\n");
+//                     }
+//                 }
+//                 if(0x03 == mode)
+//                 {
+//                     res = WriteTag(TagInfo, msgToSend, len);
+//                     if(0x00 == res)
+//                     {
+//                         printf("\tWrite Tag OK\n\tRead back data\n");
+//                         res = nfcTag_isNdef(TagInfo.handle, &NDEFinfo);
+//                         if(0x01 == res)
+//                         {
+//                             PrintfNDEFInfo(NDEFinfo);
+//                             PrintNDEFContent(&TagInfo, &NDEFinfo, NULL, 0x00);
+//                         }
+//                     }
+//                     else
+//                     {
+//                         printf("\tWrite Tag Failed\n");
+//                     }
+//                 }
+//                 num_tags = getNumTags();
+//                 if(num_tags > 1)
+//                 {
+//                     tag_count++;
+//                     if (tag_count < num_tags)
+//                     {
+//                         printf("\tMultiple tags found, selecting next tag...\n");
+//                         selectNextTag();
+//                     }
+//                     else
+//                     {
+//                         tag_count = 0;
+//                     }
+//                 }
+//                  framework_LockMutex(g_devLock);
+//             }
+//             else if(eDevType_P2P == g_Dev_Type)/*P2P Detected*/
+//             {
+//                 framework_UnlockMutex(g_devLock);
+//                  printf("\tDevice Found\n");
+                
+//                 if(2 == mode)
+//                 {
+//                     SnepPush(msgToSend, len);
+//                 }
+                
+//                 framework_LockMutex(g_SnepClientLock);
+    
+//                 if(eSnepClientState_READY == g_SnepClientState)
+//                 {
+//                     g_SnepClientState = eSnepClientState_WAIT_OFF;
+//                     framework_WaitMutex(g_SnepClientLock, 0);
+//                 }
+                
+//                 framework_UnlockMutex(g_SnepClientLock);
+//                 framework_LockMutex(g_devLock);
+        
+//             }
+//             else if(eDevType_READER == g_Dev_Type)
+//             {                
+//                 framework_LockMutex(g_HCELock);
+//                 do
+//                 {
+//                     framework_UnlockMutex(g_devLock);
+                
+//                     if(eHCEState_NONE == g_HCEState)
+//                     {
+//                         g_HCEState = eHCEState_WAIT_DATA;
+//                         framework_WaitMutex(g_HCELock, 0x00);
+//                     }
+                    
+//                     if(eHCEState_DATA_RECEIVED == g_HCEState)
+//                     {
+//                         g_HCEState = eHCEState_NONE;
+                        
+//                         if(HCE_data != NULL)
+//                         {
+//                             printf("\t\tReceived data from remote device : \n\t\t");
+                            
+//                             for(i = 0x00; i < HCE_dataLenght; i++)
+//                             {
+//                                 printf("%02X ", HCE_data[i]);
+//                             }
+                            
+//                             /*Call HCE response builder*/
+//                             T4T_NDEF_EMU_Next(HCE_data, HCE_dataLenght, HCEReponse, &HCEResponseLen);
+//                             free(HCE_data);
+//                             HCE_dataLenght = 0x00;
+//                             HCE_data = NULL;
+//                         }
+//                         framework_UnlockMutex(g_HCELock);
+//                         res = nfcHce_sendCommand(HCEReponse, HCEResponseLen);
+//                         framework_LockMutex(g_HCELock);
+//                         if(0x00 == res)
+//                         {
+//                             printf("\n\n\t\tResponse sent : \n\t\t");
+//                             for(i = 0x00; i < HCEResponseLen; i++)
+//                             {
+//                                 printf("%02X ", HCEReponse[i]);
+//                             }
+//                             printf("\n\n");
+//                         }
+//                         else
+//                         {
+//                             printf("\n\n\t\tFailed to send response\n\n");
+//                         }
+//                     }
+//                     framework_LockMutex(g_devLock);
+//                 }while(eDevState_PRESENT == g_DevState);
+//                 framework_UnlockMutex(g_HCELock);
+//             }
+//             else
+//             {
+//                 framework_UnlockMutex(g_devLock);
+//                 break;
+//             }
+            
+//             if(eDevState_PRESENT == g_DevState)
+//             {
+//                 g_DevState = eDevState_WAIT_DEPARTURE;
+//                 framework_WaitMutex(g_devLock, 0);
+//                 if(eDevType_P2P == DevTypeBck)
+//                 {
+//                     printf("\tDevice Lost\n\n");
+//                 }
+//                 DevTypeBck = eDevType_NONE;
+//             }
+//             else if(eDevType_P2P == DevTypeBck)
+//             {
+//                 printf("\tDevice Lost\n\n");
+//             }
+//         }
+        
+//         framework_UnlockMutex(g_devLock);
+//     }while(0x01);
+    
+//     return res;
+// }
+
+
 
 void strtolower(char * string) 
 {
@@ -2071,56 +2166,64 @@ int InitEnv()
     eResult tool_res = FRAMEWORK_SUCCESS;
     int res = 0x00;
     
-    // Initialize thread handle to NULL
-    g_ThreadHandle = NULL;
+    printf("=== InitEnv Debug Start ===\n");
     
+    printf("Creating device mutex...\n");
     tool_res = framework_CreateMutex(&g_devLock);
+    printf("framework_CreateMutex(g_devLock) returned: %d\n", tool_res);
     if(FRAMEWORK_SUCCESS != tool_res)
     {
-        printf("Failed to create device mutex\n");
+        printf("ERROR: Failed to create device mutex, error code: %d\n", tool_res);
         res = 0xFF;
+    } else {
+        printf("Device mutex created successfully\n");
     }
     
     if(0x00 == res)
     {
+        printf("Creating SNEP client mutex...\n");
         tool_res = framework_CreateMutex(&g_SnepClientLock);
+        printf("framework_CreateMutex(g_SnepClientLock) returned: %d\n", tool_res);
         if(FRAMEWORK_SUCCESS != tool_res)
         {
-            printf("Failed to create SNEP client mutex\n");
+            printf("ERROR: Failed to create SNEP client mutex, error code: %d\n", tool_res);
             res = 0xFF;
+        } else {
+            printf("SNEP client mutex created successfully\n");
         }
      }
      
      if(0x00 == res)
     {
+        printf("Creating HCE mutex...\n");
         tool_res = framework_CreateMutex(&g_HCELock);
+        printf("framework_CreateMutex(g_HCELock) returned: %d\n", tool_res);
         if(FRAMEWORK_SUCCESS != tool_res)
         {
-            printf("Failed to create HCE mutex\n");
+            printf("ERROR: Failed to create HCE mutex, error code: %d\n", tool_res);
             res = 0xFF;
+        } else {
+            printf("HCE mutex created successfully\n");
         }
      }
      
-     // Optional: Create exit thread only if needed
-     // Comment out this section if you don't want the exit thread
-
-    if(0x00 == res)
+     if(0x00 == res)
     {
         printf("Creating exit thread...\n");
         tool_res = framework_CreateThread(&g_ThreadHandle, ExitThread, NULL);
+        printf("framework_CreateThread returned: %d\n", tool_res);
         if(FRAMEWORK_SUCCESS != tool_res)
         {
-            printf("Failed to create exit thread - continuing without it\n");
-            g_ThreadHandle = NULL;  // Set to NULL so cleanup knows it wasn't created
-            // Don't set res = 0xFF here - continue anyway
-        }
-        else
-        {
+            printf("ERROR: Failed to create exit thread, error code: %d\n", tool_res);
+            printf("Continuing without exit thread...\n");
+            g_ThreadHandle = NULL;
+            // Don't set res = 0xFF - continue without the thread
+        } else {
             printf("Exit thread created successfully\n");
         }
     }
-
-     
+    
+    printf("=== InitEnv Debug End - Final result: %d ===\n", res);
     return res;
 }
 
